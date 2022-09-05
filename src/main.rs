@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy_inspector_egui::{Inspectable, RegisterInspectable, WorldInspectorPlugin};
 use heron::{prelude::*, Gravity, PhysicsPlugin};
 
+mod physics;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -9,7 +11,9 @@ fn main() {
         .add_plugin(WorldInspectorPlugin::new())
         .insert_resource(Gravity::from(Vec3::new(0.0, -500., 0.0)))
         .add_startup_system(spawn)
-        .add_system(set_grounded)
+        .add_system(physics::detection::handle_ground_detection)
+        .add_system(physics::detection::handle_left_wall_detection)
+        .add_system(physics::detection::handle_right_wall_detection)
         .add_system(jump)
         .add_system(movement)
         .run();
@@ -18,60 +22,9 @@ fn main() {
 #[derive(Component)]
 pub struct Player;
 
-#[derive(Component)]
-pub struct Grounded;
-
-#[derive(Component)]
-pub struct GroundDetector(pub Timer);
-
-fn set_grounded(
-    mut commands: Commands,
-    mut events: EventReader<CollisionEvent>,
-    mut query: Query<&Parent, With<GroundDetector>>,
-) {
-    for event in events.iter() {
-        for parent in &query {
-            match event {
-                CollisionEvent::Stopped(d1, d2) => {
-                    let (l1, l2) = event.collision_layers();
-
-                    if is_ground_detector(l1) && is_world(l2) {
-                        let normals = d1.normals();
-                        println!("{}", normals.len());
-                        for n in d1.normals() {
-                            println!("{}", n);
-                        }
-                        commands.entity(parent.get()).remove::<Grounded>();
-                        println!("Player has left the ground");
-                    } else if is_ground_detector(l2) && is_world(l1) {
-                        let normals = d2.normals();
-                        println!("{}", normals.len());
-                        for n in d2.normals() {
-                            println!("{}", n);
-                        }
-                        commands.entity(parent.get()).remove::<Grounded>();
-                        println!("Player has left the ground");
-                    }
-                }
-                CollisionEvent::Started(_, _) => {
-                    let (l1, l2) = event.collision_layers();
-
-                    if is_ground_detector(l1) && is_world(l2) {
-                        commands.entity(parent.get()).insert(Grounded);
-                        println!("Player has landed");
-                    } else if is_ground_detector(l2) && is_world(l1) {
-                        commands.entity(parent.get()).insert(Grounded);
-                        println!("Player has landed");
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn jump(
     input: Res<Input<KeyCode>>,
-    mut player_query: Query<(&mut Velocity, Option<&Grounded>), With<Player>>,
+    mut player_query: Query<(&mut Velocity, Option<&physics::components::Grounded>), With<Player>>,
 ) {
     for (mut velocity, grounded) in &mut player_query {
         if let Some(_) = grounded {
@@ -83,15 +36,24 @@ fn jump(
     }
 }
 
-fn movement(input: Res<Input<KeyCode>>, mut player_query: Query<&mut Velocity, With<Player>>) {
-    for mut velocity in &mut player_query {
+fn movement(
+    input: Res<Input<KeyCode>>, 
+    mut player_query: 
+        Query<(
+            &mut Velocity,
+            Option<&physics::components::LeftWall>,
+            Option<&physics::components::RightWall>
+            )
+        , With<Player>>
+) {
+    for (mut velocity, right_wall, left_wall) in &mut player_query {
         let mut x = 0.;
 
-        if input.pressed(KeyCode::A) {
+        if input.pressed(KeyCode::A) && right_wall.is_none(){
             x = -100.;
         }
 
-        if input.pressed(KeyCode::D) {
+        if input.pressed(KeyCode::D) && left_wall.is_none(){
             x = 100.;
         }
 
@@ -121,8 +83,8 @@ fn spawn(mut commands: Commands) {
         .insert(RotationConstraints::lock())
         .insert(
             CollisionLayers::none()
-                .with_group(Layer::Player)
-                .with_mask(Layer::World),
+                .with_group(physics::detection::Layer::Player)
+                .with_mask(physics::detection::Layer::World),
         )
         .insert(Velocity::default())
         .insert(Player)
@@ -135,10 +97,10 @@ fn spawn(mut commands: Commands) {
                         custom_size: Some(Vec2::ONE * 6.),
                         ..default()
                     },
-                    transform: Transform::from_translation(Vec3::Y * -31.),
+                    transform: Transform::from_translation(Vec3::Y * -28.),
                     ..default()
                 })
-                .insert(GroundDetector(Timer::from_seconds(0.1, false)))
+                .insert(physics::components::GroundDetector(Timer::from_seconds(0.1, false)))
                 .insert(RigidBody::Sensor)
                 .insert(CollisionShape::Cuboid {
                     half_extends: Vec3::new(3.0, 3.0, 1.0),
@@ -146,10 +108,61 @@ fn spawn(mut commands: Commands) {
                 })
                 .insert(
                     CollisionLayers::none()
-                        .with_group(Layer::GroundDetector)
-                        .with_mask(Layer::World),
-                );
+                        .with_group(physics::detection::Layer::GroundDetector)
+                        .with_mask(physics::detection::Layer::World),
+                )
+                .insert(Name::new("Ground Detector"));
+
+            parent
+                .spawn_bundle(SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::GREEN,
+                        custom_size: Some(Vec2::ONE * 6.),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(Vec3::X * -28.),
+                    ..default()
+                })
+                .insert(physics::components::LeftWall)
+                .insert(RigidBody::Sensor)
+                .insert(CollisionShape::Cuboid {
+                    half_extends: Vec3::new(3.0, 3.0, 1.0),
+                    border_radius: None,
+                })
+                .insert(
+                    CollisionLayers::none()
+                        .with_group(physics::detection::Layer::LeftWallDetector)
+                        .with_mask(physics::detection::Layer::World),
+                )
+                .insert(physics::components::LeftWallDetector)
+                .insert(Name::new("Left Wall Detector"));
+
+            parent
+                .spawn_bundle(SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::GREEN,
+                        custom_size: Some(Vec2::ONE * 6.),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(Vec3::X * 28.),
+                    ..default()
+                })
+                .insert(physics::components::RightWall)
+                .insert(RigidBody::Sensor)
+                .insert(CollisionShape::Cuboid {
+                    half_extends: Vec3::new(3.0, 3.0, 1.0),
+                    border_radius: None,
+                })
+                .insert(
+                    CollisionLayers::none()
+                        .with_group(physics::detection::Layer::RightWallDetector)
+                        .with_mask(physics::detection::Layer::World),
+                )
+                .insert(physics::components::RightWallDetector)
+                .insert(Name::new("Right Wall Detector"));
         });
+
+    let floor_masks = [physics::detection::Layer::Player, physics::detection::Layer::GroundDetector, physics::detection::Layer::RightWallDetector, physics::detection::Layer::LeftWallDetector];
 
     commands
         .spawn_bundle(SpriteBundle {
@@ -167,8 +180,8 @@ fn spawn(mut commands: Commands) {
         })
         .insert(
             CollisionLayers::none()
-                .with_group(Layer::World)
-                .with_masks([Layer::Player, Layer::GroundDetector]),
+                .with_group(physics::detection::Layer::World)
+                .with_masks(floor_masks.clone()),
         )
         .insert(Name::new("Floor"));
 
@@ -189,27 +202,9 @@ fn spawn(mut commands: Commands) {
         })
         .insert(
             CollisionLayers::none()
-                .with_group(Layer::World)
-                .with_masks([Layer::Player, Layer::GroundDetector]),
+                .with_group(physics::detection::Layer::World)
+                .with_masks(floor_masks.clone()),
         )
         .insert(Name::new("Floor"));
     commands.spawn_bundle(Camera2dBundle::default());
-}
-fn is_player(layers: CollisionLayers) -> bool {
-    layers.contains_group(Layer::Player)
-}
-
-fn is_world(layers: CollisionLayers) -> bool {
-    layers.contains_group(Layer::World)
-}
-
-fn is_ground_detector(layers: CollisionLayers) -> bool {
-    layers.contains_group(Layer::GroundDetector)
-}
-// Define your physics layers
-#[derive(PhysicsLayer)]
-enum Layer {
-    World,
-    Player,
-    GroundDetector,
 }
