@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_inspector_egui::{Inspectable, RegisterInspectable, WorldInspectorPlugin};
 use heron::{prelude::*, Gravity, PhysicsPlugin};
-
+use std::time::Duration;
 mod physics;
 
 fn main() {
@@ -16,21 +16,77 @@ fn main() {
         .add_system(physics::detection::handle_right_wall_detection)
         .add_system(jump)
         .add_system(movement)
+        .add_system(handle_busy)
         .run();
 }
 
 #[derive(Component)]
 pub struct Player;
 
-fn jump(
-    input: Res<Input<KeyCode>>,
-    mut player_query: Query<(&mut Velocity, Option<&physics::components::Grounded>), With<Player>>,
+#[derive(Component)]
+pub struct Busy(pub Timer);
+
+impl Busy {
+    pub fn finished(&self) -> bool {
+        self.0.finished()
+    }
+
+    pub fn tick(&mut self, delta: Duration) {
+        self.0.tick(delta);
+    }
+}
+
+fn handle_busy(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut Busy)>
 ) {
-    for (mut velocity, grounded) in &mut player_query {
-        if let Some(_) = grounded {
-            if input.pressed(KeyCode::Space) {
-                println!("He Pressin");
-                velocity.linear.y = 250.;
+    for (entity, mut busy) in &mut query {
+        busy.tick(time.delta());
+        if busy.finished() {
+            println!("Removing Finished Timer");
+            commands.entity(entity).remove::<Busy>();
+        }
+    }
+}
+
+fn jump(
+    mut commands: Commands,
+    input: Res<Input<KeyCode>>,
+    mut player_query: Query<(
+        Entity,
+        &mut Velocity, 
+        Option<&physics::components::Grounded>,
+        Option<&physics::components::LeftWall>,
+        Option<&physics::components::RightWall>
+        ), 
+        (With<Player>,
+         Without<Busy>
+         )>,
+) {
+    for (entity, mut velocity, grounded, left_wall, right_wall) in &mut player_query {
+        let mut x = 0.;
+        let mut y = 0.;
+
+        if input.pressed(KeyCode::Space) {
+            if left_wall.is_some() {
+                x = 200.;
+                y = 200.;
+            }
+
+            if right_wall.is_some() {
+                x = -200.;
+                y = 200.;
+            }
+
+            if grounded.is_some() {
+                y = 250.;
+            }
+
+            if x != 0. {velocity.linear.x = x}
+            if y != 0. {velocity.linear.y = y}
+            if left_wall.is_some() || right_wall.is_some() {
+                commands.entity(entity).insert(Busy(Timer::from_seconds(0.25, false)));
             }
         }
     }
@@ -43,8 +99,9 @@ fn movement(
             &mut Velocity,
             Option<&physics::components::LeftWall>,
             Option<&physics::components::RightWall>
-            )
-        , With<Player>>
+            ),
+            (With<Player>,
+             Without<Busy>)>
 ) {
     for (mut velocity, right_wall, left_wall) in &mut player_query {
         let mut x = 0.;
