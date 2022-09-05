@@ -2129,15 +2129,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lakeside"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy-inspector-egui",
- "heron",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3179,6 +3170,15 @@ dependencies = [
  "num-traits",
  "paste",
  "wide",
+]
+
+[[package]]
+name = "simple-platformer"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-inspector-egui",
+ "heron",
 ]
 
 [[package]]
